@@ -6,8 +6,6 @@ import cvxopt
 from math import exp
 import matplotlib.pyplot as pyplot
 
-cvxopt.solvers.options['show_progress'] = False
-
 # Main class
 class SVM(object):
 
@@ -17,6 +15,9 @@ class SVM(object):
         self.kernel_mode = options['kernel']
         self.datafile = options['datafile']
         self.do_plot = options['plot']
+        self.is_debug_mode = options['debug']
+
+        cvxopt.solvers.options['show_progress'] = self.is_debug_mode
 
         self.kernel = SVM.get_kernel(self.kernel_mode)
         self.calc_threshold = SVM.get_threshold(self.kernel_mode)
@@ -58,10 +59,33 @@ class SVM(object):
             A_0 = cvxopt.matrix(A_0, (1, datasize))
             b_0 = cvxopt.matrix(b_0)
 
+            # print parameters if debug mode
+
+            if self.is_debug_mode:
+                print 'Q:'
+                print Q
+                print 'q:'
+                print q
+                print 'A:'
+                print A
+                print 'b:'
+                print b
+                print 'A_0:'
+                print A_0
+                print 'b_0:'
+                print b_0
+
             # solve cone quadratic programming and get lagrangians
 
             solution = cvxopt.solvers.qp(Q, q, A, b, A_0, b_0)
+            # TODO: check solution['status']
             lagrangians = solution['x']
+
+            # print Lagrangians if debug mode
+
+            if self.is_debug_mode:
+                print 'Lagrangians:'
+                print lagrangians
 
             # calculate weight vector and threshold
 
@@ -83,7 +107,8 @@ class SVM(object):
             else:
                 threshold = self.calc_threshold(data, clas, lagrangians, self.kernel)
 
-                click.echo('p: %s' % map(lambda i : lagrangians[i] * clas[i], range(len(lagrangians))))
+                click.echo('p:')
+                click.echo(map(lambda i : lagrangians[i] * clas[i] if lagrangians[i] > self.DELTA else 0, range(len(lagrangians))))
                 click.echo('Threshold t: %f' % threshold)
                 click.echo('Classifier: f(x, p, t) = sign( sum(p[i] * Kernel(x, x_i)) - t)')
 
@@ -109,7 +134,7 @@ class SVM(object):
             return inner_product
 
         def poly(x, y):
-            return (1 + linear(x, y)) ** len(x)
+            return (1 + linear(x, y)) ** 2#len(x)
 
         def gauss(x, y):
             if len(x) != len(y):
@@ -135,7 +160,6 @@ class SVM(object):
         except BaseException, e:
             click.echo(e)
             exit()
-
 
     @classmethod
     def get_threshold(cls, kernel_mode='linear'):
@@ -207,7 +231,10 @@ class SVM(object):
                     pyplot.plot(data[i][0], data[i][1], 'bx')
 
             # plot classifier
-            classifier_x = numpy.linspace(0, 50, 1000)
+            min_cell = min(map(lambda d : min(d), data))
+            max_cell = max(map(lambda d : max(d), data))
+            padding = (min_cell + max_cell) / 15.0
+            classifier_x = numpy.linspace(min_cell - padding, max_cell + padding, 1000)
             classifier_y = map(lambda x_i : classifier(x_i, weight, threshold), classifier_x)
 
             pyplot.plot(classifier_x, classifier_y, 'g-')
@@ -224,7 +251,11 @@ class SVM(object):
                     pyplot.plot(data[i][0], data[i][1], 'bx')
 
             # plot classifier
-            X1, X2 = numpy.meshgrid(numpy.linspace(0, 50, 50), numpy.linspace(0, 50, 50))
+            min_cell = min(map(lambda d : min(d), data))
+            max_cell = max(map(lambda d : max(d), data))
+            padding = (min_cell + max_cell) / 15.0
+            X1, X2 = numpy.meshgrid(numpy.linspace(min_cell - padding, max_cell + padding, 50),
+                                    numpy.linspace(min_cell - padding, max_cell + padding, 50))
             width, height = X1.shape
             X1.resize(X1.size)
             X2.resize(X2.size)
@@ -246,13 +277,15 @@ CONTEXT_SETTINGS = { 'help_option_names': ['-h', '--help'] }
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.option('-k', '--kernel', default='linear', help='Type of Kernel [linear/poly/gauss]')
 @click.option('-p', '--plot', default=False, is_flag=True, help='Plot Data and Classifier')
+@click.option('-d', '--debug', default=False, is_flag=True, help='Execute program in debug mode')
 @click.argument('datafile', required=True)
-def cli(kernel, datafile, plot):
+def cli(kernel, datafile, plot, debug):
 
     options = {
             'kernel': kernel,
             'datafile': datafile,
-            'plot': plot
+            'plot': plot,
+            'debug': debug
             }
 
     svm = SVM(options)
@@ -271,7 +304,8 @@ if __name__ == '__main__':
         options = {
                 'kernel': 'linear',
                 'datafile': argv[1],
-                'plot': False
+                'plot': False,
+                'debug': False
                 }
 
         svm = SVM(options)
@@ -281,7 +315,8 @@ if __name__ == '__main__':
         options = {
                 'kernel': argv[2],
                 'datafile': argv[1],
-                'plot': False
+                'plot': False,
+                'debug': False
                 }
 
         svm = SVM(options)

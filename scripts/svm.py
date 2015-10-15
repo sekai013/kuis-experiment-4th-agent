@@ -6,125 +6,140 @@ import cvxopt
 from math import exp
 import matplotlib.pyplot as pyplot
 
-# Main class
+# Main Class
 class SVM(object):
 
     DELTA = 1.0e-6
+
+    MIN_PARAM = {
+            'poly': 1,
+            'gauss': 1.0
+            }
+
+    MAX_PARAM = {
+            'poly': 10,
+            'gauss': 15.0
+            }
 
     def __init__(self, options):
         self.kernel_mode = options['kernel']
         self.datafile = options['datafile']
         self.do_plot = options['plot']
-        self.is_debug_mode = options['debug']
+        self.debug = options['debug']
+        self.fold = options['fold']
 
-        cvxopt.solvers.options['show_progress'] = self.is_debug_mode
+        cvxopt.solvers.options['show_progress'] = self.debug
 
-        self.kernel = SVM.get_kernel(self.kernel_mode)
-        self.calc_threshold = SVM.get_threshold(self.kernel_mode)
-        self.plot = SVM.get_plot(self.kernel_mode)
+        self.kernel = self.get_kernel(self.kernel_mode)
 
-    def run(self):
         try:
-            # Minimize  : (1/2)(x^T)(Q)(x) + (q^t)(x)
-            # Subject to: (A)(x) >= b, (A_0)(x) = b_0
-
             data = numpy.loadtxt(self.datafile)
-            clas = map(lambda d : d[-1], data)
-            data = map(lambda d : d[:-1], data)
-
-            datasize = len(data)
-
-            # Setup matrix and vector
-
-            Q = numpy.zeros((datasize, datasize))
-  
-            for i in range(datasize):
-                for j in range(datasize):
-                    Q[i][j] = clas[i] * clas[j] * self.kernel(data[i], data[j])
-  
-            q = - numpy.ones(datasize)
-  
-            A = numpy.diag([-1.0] * datasize)
-            b = numpy.zeros(datasize)
-  
-            A_0 = clas
-            b_0 = 0.0
-
-            # convert matrix and vector to cvxopt.matrix object
-  
-            Q = cvxopt.matrix(Q)
-            q = cvxopt.matrix(q)
-            A = cvxopt.matrix(A)
-            b = cvxopt.matrix(b)
-            A_0 = cvxopt.matrix(A_0, (1, datasize))
-            b_0 = cvxopt.matrix(b_0)
-
-            # print parameters if debug mode
-
-            if self.is_debug_mode:
-                print 'Q:'
-                print Q
-                print 'q:'
-                print q
-                print 'A:'
-                print A
-                print 'b:'
-                print b
-                print 'A_0:'
-                print A_0
-                print 'b_0:'
-                print b_0
-
-            # solve cone quadratic programming and get lagrangians
-
-            solution = cvxopt.solvers.qp(Q, q, A, b, A_0, b_0)
-            # TODO: check solution['status']
-            lagrangians = solution['x']
-
-            # print Lagrangians if debug mode
-
-            if self.is_debug_mode:
-                print 'Lagrangians:'
-                print lagrangians
-
-            # calculate weight vector and threshold
-
-            if self.kernel_mode == 'linear':
-                weight = [0] * len(data[0])
-
-                for i in range(len(lagrangians)):
-                    if lagrangians[i] > self.DELTA:
-                        weight = map(lambda j : weight[j] + lagrangians[i] * clas[i] * data[i][j], range(len(data[0])))
-
-                threshold = self.calc_threshold(data, clas, lagrangians, self.kernel, weight)
-
-                click.echo('Weight: %s' % weight)
-                click.echo('Threshold: %f' % threshold)
-
-                if self.do_plot and len(data[0]) == 2:
-                    self.plot(data, clas, weight, threshold)
-
-            else:
-                threshold = self.calc_threshold(data, clas, lagrangians, self.kernel)
-
-                click.echo('p:')
-                click.echo(map(lambda i : lagrangians[i] * clas[i] if lagrangians[i] > self.DELTA else 0, range(len(lagrangians))))
-                click.echo('Threshold t: %f' % threshold)
-                click.echo('Classifier: f(x, p, t) = sign( sum(p[i] * Kernel(x, x_i)) - t)')
-
-                if self.do_plot and len(data[0]) == 2:
-                    self.plot(data, clas, lagrangians, threshold, self.kernel)
-
+            self.clas = map(lambda d : d[-1], data)
+            self.data = map(lambda d : d[:-1], data)
         except IOError:
             click.echo('Failed to open file %s' % self.datafile)
             exit()
 
+    def run(self):
+        if self.kernel_mode == 'linear':
+            self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot)
+        else:
+            self.decide_kernel_parameter(
+                    self.MIN_PARAM[self.kernel_mode],
+                    self.MAX_PARAM[self.kernel_mode]
+                    )
+            optimal_kernel = lambda x, y : self.kernel(x, y, self.parameter)
+            self.calc_classifier(self.kernel_mode, self.data, self.clas, optimal_kernel, self.debug, self.do_plot)
+
+    def decide_kernel_parameter(self, min_param, max_param):
+        if self.kernel_mode == 'poly':
+            click.echo('Searching Optimal Parameter for Polynomial Kernel')
+            candidates = range(min_param, max_param+1)
+            trial_msg_tpl = '[Trying..] d = %d'
+            result_msg_tpl = 'Optimal Parameter: d = %d'
+        else:
+            click.echo('Searching Optimal Parameter for Gauss Kernel')
+            trial_msg_tpl = '[Trying..] sigma = %f'
+            candidates = numpy.linspace(min_param, max_param, 50)
+            result_msg_tpl = 'Optimal Parameter: sigma = %f'
+
+        max_accuracy = 0
+        optimal_param = -1
+
+        for c in candidates:
+            click.echo(trial_msg_tpl % c)
+
+            kernel = lambda x, y : self.kernel(x, y, c)
+            accuracy = self.cross_validate(self.kernel_mode, self.data, self.clas, kernel, debug=self.debug, fold=self.fold)
+
+            click.echo('[  Done  ] Accuracy: %f' % accuracy)
+
+            if max_accuracy < accuracy:
+                max_accuracy = accuracy
+                optimal_param = c
+
+        click.echo(result_msg_tpl % optimal_param)
+        self.parameter = optimal_param
+
     @classmethod
-    def get_kernel(cls, kernel_mode='linear'):
-        
+    def print_debug(cls, item):
+        if self.debug:
+            click.echo(item)
+
+    @classmethod
+    def calc_classifier(cls, kernel_mode, data, clas, kernel, debug=False, do_plot=False):
+
+        try:
+            solution = cls.solve_qp(data, clas, kernel, debug)
+            if solution['status'] == 'unknown':
+                raise BaseException, 'Couldn\'t solve program'
+            lagrangians = solution['x']
+         
+            if debug:
+                click.echo('Lagrangians:')
+                click.echo(lagrangians)
+         
+            if kernel_mode == 'linear':
+                weight = [0] * len(data[0])
+         
+                for i in range(len(lagrangians)):
+                    if lagrangians[i] > cls.DELTA:
+                        weight = map(lambda j : weight[j] + lagrangians[i] * clas[i] * data[i][j], range(len(data[0])))
+         
+                threshold = cls.threshold_function(kernel_mode, data, clas, lagrangians, kernel, weight=weight)
+         
+                #click.echo('Weight: %s' % weight)
+                #click.echo('Threshold: %f' % threshold)
+         
+                if do_plot and len(data[0]):
+                    cls.plot(kernel_mode, data, clas, kernel, threshold, weight=weight)
+                class_func = cls.get_classifier_function(kernel_mode)
+                return lambda x : class_func(x, weight, kernel, threshold)
+         
+            else:
+                threshold = cls.threshold_function(kernel_mode, data, clas, lagrangians, kernel)
+         
+                #click.echo('p:')
+                #click.echo(map(lambda i : lagrangians[i] * clas[i] if lagrangians[i] > cls.DELTA else 0, range(len(lagrangians))))
+                #click.echo('Threshold t: %f' % threshold)
+                #click.echo('Classifier: f(x, p, t) = sign ( sum(p_i * Kernel(x, x_i)) - t )')
+         
+                if do_plot and len(data[0]):
+                    cls.plot(kernel_mode, data, clas, kernel, threshold, lagrangians=lagrangians)
+         
+                class_func = cls.get_classifier_function(kernel_mode)
+                return lambda x : class_func(x, data, clas, lagrangians, kernel, threshold)
+        except BaseException:
+            return None
+
+
+    @classmethod
+    def get_kernel(cls, kernel_mode):
+        error_msg_tpl = 'Size of x is %d but size of y is %d'
+
         def linear(x, y):
             if len(x) != len(y):
-                raise BaseException, 'size of x is %d but size of y is %d' % (len(x), len(y))
+                raise BaseException, error_msg_tpl % (len(x), len(y))
 
             inner_product = 0
 
@@ -133,14 +148,13 @@ class SVM(object):
 
             return inner_product
 
-        def poly(x, y):
-            return (1 + linear(x, y)) ** 2#len(x)
+        def poly(x, y, dimension=2):
+            return (1 + linear(x, y)) ** dimension
 
-        def gauss(x, y):
+        def gauss(x, y, sigma=10):
             if len(x) != len(y):
-                raise BaseException, 'size of x is %d but size of y is %d' % (len(x), len(y))
+                raise BaseException, error_msg_tpl % (len(x), len(y))
 
-            sigma = 10
             norm = sum(map(lambda i : (x[i] - y[i]) ** 2, range(len(x))))
             return exp(- norm / (2 * (sigma ** 2)))
 
@@ -150,38 +164,32 @@ class SVM(object):
                 'gauss': gauss
                 }
 
-        kernel_mode = kernel_mode.lower()
-
         try:
-            if kernel_mode in KERNELS:
-                return KERNELS[kernel_mode]
+            if kernel_mode.lower() in KERNELS:
+                return KERNELS[kernel_mode.lower()]
             else:
-                raise BaseException, 'Invalid Kernel:%s hit `svm --help` to check usage.' % kernel_mode
+                raise BaseException, '''Invalid Kernel: %s
+use `svm --help` to check usage.''' % kernel_mode
         except BaseException, e:
             click.echo(e)
             exit()
 
     @classmethod
-    def get_threshold(cls, kernel_mode='linear'):
+    def threshold_function(cls, kernel_mode, data, clas, lagrangians, kernel, weight=[]):
 
-        def linear(data, clas, lagrangians, kernel, w=[]):
-            count = 0
-            theta = 0
+        count = 0
+        theta = 0
+
+        if kernel_mode == 'linear':
 
             for i in range(len(lagrangians)):
-
                 if lagrangians[i] > cls.DELTA:
                     count += 1
-                    theta += kernel(w, data[i]) - clas[i]
+                    theta += kernel(weight, data[i]) - clas[i]
 
-            return theta / count
-
-        def nonlinear(data, clas, lagrangians, kernel):
-            count = 0
-            theta = 0
+        else:
 
             for i in range(len(lagrangians)):
-
                 if lagrangians[i] > cls.DELTA:
                     count += 1
                     inner_product = 0
@@ -191,26 +199,21 @@ class SVM(object):
 
                     theta += inner_product - clas[i]
 
-            return theta / count
-
-        if kernel_mode == 'linear':
-            return linear
-        else:
-            return nonlinear
+        return theta / count if count != 0 else -sum(clas)/len(clas)
 
     @classmethod
-    def get_classifier(cls, kernel_mode='linear'):
+    def get_classifier_function(cls, kernel_mode):
 
-        def linear(x, w, theta):
-            return - (w[0] * x - theta) / w[1]
+        def linear(x, weight, kernel, threshold):
+            return kernel(x, weight) - threshold
 
-        def nonlinear(x, data, clas, lagrangians, theta, kernel):
+        def nonlinear(x, data, clas, lagrangians, kernel, threshold):
             c = 0
 
             for i in range(len(lagrangians)):
                 c += lagrangians[i] * clas[i] * kernel(x, data[i])
 
-            return c - theta
+            return c - threshold
 
         if kernel_mode == 'linear':
             return linear
@@ -218,74 +221,155 @@ class SVM(object):
             return nonlinear
 
     @classmethod
-    def get_plot(cls, kernel_mode='linear'):
-        
-        def linear(data, clas, weight, threshold):
-            classifier = cls.get_classifier(kernel_mode)
+    def plot(cls, kernel_mode, data, clas, kernel, threshold, lagrangians=[], weight=[]):
+        class_func = cls.get_classifier_function(kernel_mode)
 
-            # plot data
-            for i in range(len(data)):
-                if clas[i] == 1:
-                    pyplot.plot(data[i][0], data[i][1], 'rx')
-                else:
-                    pyplot.plot(data[i][0], data[i][1], 'bx')
+        # Plot data
 
-            # plot classifier
-            min_cell = min(map(lambda d : min(d), data))
-            max_cell = max(map(lambda d : max(d), data))
-            padding = (min_cell + max_cell) / 15.0
-            classifier_x = numpy.linspace(min_cell - padding, max_cell + padding, 1000)
-            classifier_y = map(lambda x_i : classifier(x_i, weight, threshold), classifier_x)
+        for i in range(len(data)):
+            if clas[i] == 1:
+                pyplot.plot(data[i][0], data[i][1], 'rx')
+            else:
+                pyplot.plot(data[i][0], data[i][1], 'bx')
 
-            pyplot.plot(classifier_x, classifier_y, 'g-')
-            pyplot.show()
+        # Plot Classifier
 
-        def nonlinear(data, clas, lagrangians, threshold, kernel):
-            classifier = cls.get_classifier(kernel_mode)
+        min_cell = min(map(lambda d : min(d), data))
+        max_cell = max(map(lambda d : max(d), data))
+        padding = (min_cell + max_cell) / 15.0
+        m, M = min_cell - padding, max_cell + padding
 
-            # plot data
-            for i in range(len(data)):
-                if clas[i] == 1:
-                    pyplot.plot(data[i][0], data[i][1], 'rx')
-                else:
-                    pyplot.plot(data[i][0], data[i][1], 'bx')
+        X1, X2 = numpy.meshgrid(numpy.linspace(m, M, 50),
+                numpy.linspace(m, M, 50))
+        width, height = X1.shape
 
-            # plot classifier
-            min_cell = min(map(lambda d : min(d), data))
-            max_cell = max(map(lambda d : max(d), data))
-            padding = (min_cell + max_cell) / 15.0
-            X1, X2 = numpy.meshgrid(numpy.linspace(min_cell - padding, max_cell + padding, 50),
-                                    numpy.linspace(min_cell - padding, max_cell + padding, 50))
-            width, height = X1.shape
-            X1.resize(X1.size)
-            X2.resize(X2.size)
-            Z = numpy.array([classifier(numpy.array([x1, x2]), data, clas, lagrangians, threshold, kernel) for (x1, x2) in zip(X1, X2)])
-            X1.resize((width, height))
-            X2.resize((width, height))
-            Z.resize((width, height))
-
-            pyplot.contour(X1, X2, Z, [0.0], colors='k', linewidths=1, origin='lower')
-            pyplot.show()
+        X1.resize(X1.size)
+        X2.resize(X2.size)
 
         if kernel_mode == 'linear':
-            return linear
+            Z = numpy.array([
+                class_func(
+                    numpy.array([x1, x2]),
+                    weight, kernel, threshold
+                    ) for (x1, x2) in zip(X1, X2)
+                ])
         else:
-            return nonlinear
+            Z = numpy.array([
+                class_func(
+                    numpy.array([x1, x2]),
+                    data, clas, lagrangians,
+                    kernel, threshold
+                    ) for (x1, x2) in zip(X1, X2)
+                ])
+
+        X1.resize((width, height))
+        X2.resize((width, height))
+        Z.resize((width, height))
+
+        pyplot.contour(
+                X1, X2, Z, [0.0],
+                colors='k', linewidths=1, origin='lower'
+                )
+
+        pyplot.show()
+
+    @classmethod
+    def solve_qp(cls, data, clas, kernel, debug=False):
+        # Minimize  : (1/2)(x^T)(Q)(x) + (q^t)(x)
+        # Subject to: (A)(x) >= b, (A_0)(x) = b_0
+
+        datasize = len(data)
+
+        # Setup matrix and vector
+
+        Q = numpy.zeros((datasize, datasize))
+  
+        for i in range(datasize):
+            for j in range(datasize):
+                Q[i][j] = clas[i] * clas[j] * kernel(data[i], data[j])
+  
+        q = - numpy.ones(datasize)
+  
+        A = numpy.diag([-1.0] * datasize)
+        b = numpy.zeros(datasize)
+  
+        A_0 = clas
+        b_0 = 0.0
+
+        # Convert matrix and vector to cvxopt.matrix object
+  
+        Q = cvxopt.matrix(Q)
+        q = cvxopt.matrix(q)
+        A = cvxopt.matrix(A)
+        b = cvxopt.matrix(b)
+        A_0 = cvxopt.matrix(A_0, (1, datasize))
+        b_0 = cvxopt.matrix(b_0)
+
+        # Print parameters if debug mode
+
+        if debug:
+            click.echo('Q:')
+            click.echo(Q)
+            click.echo('q:')
+            click.echo(q)
+            click.echo('A:')
+            click.echo(A)
+            click.echo('b:')
+            click.echo(b)
+            click.echo('A_0:')
+            click.echo(A_0)
+            click.echo('b_0:')
+            click.echo(b_0)
+
+        # Solve cone quadratic programming and return solution
+
+        return cvxopt.solvers.qp(Q, q, A, b, A_0, b_0)
+
+    @classmethod
+    def cross_validate(cls, kernel_mode, data, clas, kernel, fold=10, debug=False):
+        datasize = len(data)
+        unitsize = datasize / fold
+
+        result = 0
+
+        for i in range(fold):
+            # select data[i*unitsize:(i+1)*unitsize] for test data
+            # and the others for training data
+            i *= unitsize
+            data_i = [x for (x, j) in zip(data, range(len(data))) if j not in range(i, i+unitsize)]
+            clas_i = [x for (x, j) in zip(clas, range(len(clas))) if j not in range(i, i+unitsize)]
+
+            test_data_i = data[i:i+unitsize]
+            test_clas_i = clas[i:i+unitsize]
+
+            class_func = cls.calc_classifier(kernel_mode, data_i, clas_i, kernel)
+            if class_func == None:
+                continue
+
+            test_result = map(lambda j : class_func(test_data_i[j]) * test_clas_i[j], range(len(test_data_i)))
+            test_passed = [x for x in test_result if x > 1]
+
+            result += float(len(test_passed))/float(len(test_result))
+
+        return result / fold
+
 
 CONTEXT_SETTINGS = { 'help_option_names': ['-h', '--help'] }
 
 @click.command(context_settings=CONTEXT_SETTINGS)
+@click.argument('datafile', required=True)
+@click.option('-d', '--debug', default=False, is_flag=True, help='Execute program in debug mode')
+@click.option('-f', '--fold', default=10, help='Number of subsamples into which original sample is partitioned')
 @click.option('-k', '--kernel', default='linear', help='Type of Kernel [linear/poly/gauss]')
 @click.option('-p', '--plot', default=False, is_flag=True, help='Plot Data and Classifier')
-@click.option('-d', '--debug', default=False, is_flag=True, help='Execute program in debug mode')
-@click.argument('datafile', required=True)
-def cli(kernel, datafile, plot, debug):
+def cli(datafile, debug, fold, kernel, plot):
 
     options = {
-            'kernel': kernel,
             'datafile': datafile,
-            'plot': plot,
-            'debug': debug
+            'debug': debug,
+            'fold': fold,
+            'kernel': kernel,
+            'plot': plot
             }
 
     svm = SVM(options)
@@ -302,22 +386,31 @@ if __name__ == '__main__':
     elif len(argv) == 2:
 
         options = {
-                'kernel': 'linear',
                 'datafile': argv[1],
-                'plot': False,
-                'debug': False
+                'debug': False,
+                'fold': 10,
+                'kernel': 'linear',
+                'plot': False
                 }
 
-        svm = SVM(options)
-        svm.run()
+    elif len(argv) == 3:
+ 
+        options = {
+                'datafile': argv[1],
+                'debug': False,
+                'fold': 10,
+                'kernel': argv[2],
+                'plot': False
+                }
     else:
 
         options = {
-                'kernel': argv[2],
                 'datafile': argv[1],
-                'plot': False,
-                'debug': False
+                'debug': False,
+                'fold': int(argv[3]),
+                'kernel': argv[2],
+                'plot': False
                 }
 
-        svm = SVM(options)
-        svm.run()
+    svm = SVM(options)
+    svm.run()

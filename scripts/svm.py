@@ -42,24 +42,24 @@ class SVM(object):
 
     def run(self):
         if self.kernel_mode == 'linear':
-            self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot)
+            self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot, show_result=True)
         else:
             self.decide_kernel_parameter(
                     self.MIN_PARAM[self.kernel_mode],
                     self.MAX_PARAM[self.kernel_mode]
                     )
             optimal_kernel = lambda x, y : self.kernel(x, y, self.parameter)
-            self.calc_classifier(self.kernel_mode, self.data, self.clas, optimal_kernel, self.debug, self.do_plot)
+            self.calc_classifier(self.kernel_mode, self.data, self.clas, optimal_kernel, self.debug, self.do_plot, show_result=True)
 
     def decide_kernel_parameter(self, min_param, max_param):
         if self.kernel_mode == 'poly':
             click.echo('Searching Optimal Parameter for Polynomial Kernel')
             candidates = range(min_param, max_param+1)
-            trial_msg_tpl = '[Trying..] d = %d'
+            trial_msg_tpl = 'Trying d = %d ...'
             result_msg_tpl = 'Optimal Parameter: d = %d'
         else:
             click.echo('Searching Optimal Parameter for Gauss Kernel')
-            trial_msg_tpl = '[Trying..] sigma = %f'
+            trial_msg_tpl = 'Trying sigma = %f ...'
             candidates = numpy.linspace(min_param, max_param, 50)
             result_msg_tpl = 'Optimal Parameter: sigma = %f'
 
@@ -72,22 +72,25 @@ class SVM(object):
             kernel = lambda x, y : self.kernel(x, y, c)
             accuracy = self.cross_validate(self.kernel_mode, self.data, self.clas, kernel, debug=self.debug, fold=self.fold)
 
-            click.echo('[  Done  ] Accuracy: %f' % accuracy)
+            self.print_debug('Accuracy: %f' % accuracy)
+            click.echo('Done.')
 
             if max_accuracy < accuracy:
                 max_accuracy = accuracy
                 optimal_param = c
 
+        click.echo()
         click.echo(result_msg_tpl % optimal_param)
+        click.echo('Estimated Accuracy: %f' % max_accuracy)
+        click.echo()
         self.parameter = optimal_param
 
-    @classmethod
-    def print_debug(cls, item):
+    def print_debug(self, item):
         if self.debug:
             click.echo(item)
 
     @classmethod
-    def calc_classifier(cls, kernel_mode, data, clas, kernel, debug=False, do_plot=False):
+    def calc_classifier(cls, kernel_mode, data, clas, kernel, debug=False, do_plot=False, show_result=False):
 
         try:
             solution = cls.solve_qp(data, clas, kernel, debug)
@@ -108,27 +111,31 @@ class SVM(object):
          
                 threshold = cls.threshold_function(kernel_mode, data, clas, lagrangians, kernel, weight=weight)
          
-                #click.echo('Weight: %s' % weight)
-                #click.echo('Threshold: %f' % threshold)
+                if show_result:
+                    click.echo('Weight: %s' % weight)
+                    click.echo('Threshold: %f' % threshold)
          
                 if do_plot and len(data[0]):
                     cls.plot(kernel_mode, data, clas, kernel, threshold, weight=weight)
+
                 class_func = cls.get_classifier_function(kernel_mode)
                 return lambda x : class_func(x, weight, kernel, threshold)
          
             else:
                 threshold = cls.threshold_function(kernel_mode, data, clas, lagrangians, kernel)
          
-                #click.echo('p:')
-                #click.echo(map(lambda i : lagrangians[i] * clas[i] if lagrangians[i] > cls.DELTA else 0, range(len(lagrangians))))
-                #click.echo('Threshold t: %f' % threshold)
-                #click.echo('Classifier: f(x, p, t) = sign ( sum(p_i * Kernel(x, x_i)) - t )')
+                if show_result:
+                     click.echo('p:')
+                     click.echo(map(lambda i : lagrangians[i] * clas[i] if lagrangians[i] > cls.DELTA else 0, range(len(lagrangians))))
+                     click.echo('Threshold t: %f' % threshold)
+                     click.echo('Classifier: f(x, p, t) = sign ( sum(p_i * Kernel(x, x_i)) - t )')
          
                 if do_plot and len(data[0]):
                     cls.plot(kernel_mode, data, clas, kernel, threshold, lagrangians=lagrangians)
          
                 class_func = cls.get_classifier_function(kernel_mode)
                 return lambda x : class_func(x, data, clas, lagrangians, kernel, threshold)
+
         except BaseException:
             return None
 

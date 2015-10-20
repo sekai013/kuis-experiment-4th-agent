@@ -8,6 +8,7 @@ setup(
         entry_points = """
             [console_scripts]
             svm=scripts.svm:cli
+            auction=scripts.auction_client:cli
         """,
         zip_safe = False,
         classifiers=[

@@ -72,7 +72,7 @@ class SVM(object):
             kernel = lambda x, y : self.kernel(x, y, c)
             accuracy = self.cross_validate(self.kernel_mode, self.data, self.clas, kernel, debug=self.debug, fold=self.fold)
 
-            self.print_debug('Accuracy: %f' % accuracy)
+            click.echo('Accuracy: %f' % accuracy)
             click.echo('Done.')
 
             if max_accuracy < accuracy:
@@ -364,7 +364,7 @@ use `svm --help` to check usage.''' % kernel_mode
 CONTEXT_SETTINGS = { 'help_option_names': ['-h', '--help'] }
 
 @click.command(context_settings=CONTEXT_SETTINGS)
-@click.argument('datafile', required=True)
+@click.argument('datafile', type=click.Path(exists=True), required=True)
 @click.option('-d', '--debug', default=False, is_flag=True, help='Execute program in debug mode')
 @click.option('-f', '--fold', default=10, help='Number of subsamples into which original sample is partitioned')
 @click.option('-k', '--kernel', default='linear', help='Type of Kernel [linear/poly/gauss]')

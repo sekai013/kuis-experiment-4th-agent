@@ -41,7 +41,7 @@ class SVM(object):
             exit()
 
     def run(self):
-        if self.kernel_mode == 'linear':
+        if self.kernel_mode == 'linear' or len(self.data) < 10:
             self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot, show_result=True)
         else:
             self.decide_kernel_parameter(

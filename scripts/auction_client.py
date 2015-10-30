@@ -146,11 +146,18 @@ class AuctionClient(object):
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
 
-        for winner, i in zip(self.winner, range(len(self.winner))):
-            for h in self.histories:
-                h[int(winner)-1][i] = '1'
-
         item_range = range(self.item_size)
+
+        for winner, item_index in zip(self.winners, item_range):
+            if winner == None:
+                continue
+            for w in winner:
+                for h in self.histories:
+                    h[w][item_index] = '1'
+
+      # for winner, i in zip(self.winner, range(len(self.winner))):
+      #     for h in self.histories:
+      #         h[int(winner)-1][i] = '1'
 
         for i in range(1, max_level+1):
             for j in range(self.participant_size):

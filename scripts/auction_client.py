@@ -18,9 +18,30 @@ class AuctionClient(object):
         self.port = options['port']
         self.demo = options['demo']
 
+        if options['eval']:
+            self.load_eval_value(options['eval'])
+
         self.bid_round = 0
         self.prices = []
         self.histories = []
+
+    def load_eval_value(self, path):
+
+        def format_key(key):
+            key_and_index = zip(list(key), range(len(key)))
+            return '-'.join([str(i + 1) for k, i in \
+                    key_and_index if k == '1'])
+
+            if not os.path.exists(path):
+                raise BaseException, '%s doesn\'t exist' % path
+
+        with open(path, 'r') as eval_file:
+            self.value = {}
+            v = map(lambda x : x.split(':'), \
+                    eval_file.read().split(' '))
+
+            for key, val in v:
+                self.value[format_key(key)] = int(val)
 
     def connect(self):
         # connect to auction server
@@ -122,8 +143,6 @@ class AuctionClient(object):
         result = self.socket.recv(self.BUFSIZE).rstrip()
         self.socket.close()
 
-        self.winner = map(lambda s : s[-1], winner.split(' ')[2:])
-
         line_length = self.item_size * 2 \
                 + (self.item_size + 1) * self.participant_size
         half_line = '-' * (line_length / 2)
@@ -137,6 +156,9 @@ class AuctionClient(object):
         self.format_result(result)
 
     def format_result(self, result, max_level=3):
+
+        click.echo(self.histories)
+        click.echo(self.prices)
 
         if not os.path.exists(self.LOG_DIR):
             os.mkdir(self.LOG_DIR)
@@ -154,10 +176,6 @@ class AuctionClient(object):
             for w in winner:
                 for h in self.histories:
                     h[w][item_index] = '1'
-
-      # for winner, i in zip(self.winner, range(len(self.winner))):
-      #     for h in self.histories:
-      #         h[int(winner)-1][i] = '1'
 
         for i in range(1, max_level+1):
             for j in range(self.participant_size):
@@ -203,13 +221,17 @@ CONTEXT_SETTINGS = { 'help_option_names': ['-h', '--help'] }
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.argument('host', nargs=1, required=True)
 @click.argument('port', nargs=1, required=True)
-@click.option('-d', '--demo', default=0, help='bid automatically for n times.')
+@click.option('-d', '--demo', default=0, \
+        help='bid automatically for n times.')
+@click.option('-e', '--evaluation', default=None, \
+        help='load evaluation values.')
 def cli(host, port, demo):
     
     options = {
             'host': host,
             'port': int(port),
-            'demo': demo
+            'demo': demo,
+            'eval': evaluation
             }
 
     client = AuctionClient(options)
@@ -227,6 +249,7 @@ if __name__ == '__main__':
     options['host'] = sys.argv[1]
     options['port'] = int(sys.argv[2])
     options['demo'] = 0 if len(sys.argv) < 4 else int(sys.argv[3])
+    options['eval'] = None if len(sys.argv) < 5 else sys.argv[4]
 
     client = AuctionClient(options)
     client.connect()

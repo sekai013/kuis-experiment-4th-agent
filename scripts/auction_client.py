@@ -18,6 +18,10 @@ class AuctionClient(object):
         self.port = options['port']
         self.demo = options['demo']
 
+        self.bid_round = 0
+        self.prices = []
+        self.histories = []
+
     def connect(self):
         # connect to auction server
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -47,6 +51,9 @@ class AuctionClient(object):
                 lambda s : int(s.split(' ')[-1]),\
                 data.split('\n'))
 
+        self.prices.append(['0'] * self.item_size)
+        self.winners = ([None] * self.item_size)
+
         click.echo('%d clients are taking part in this auction:'\
                 % self.participant_size)
         click.echo(participants)
@@ -74,9 +81,13 @@ class AuctionClient(object):
         click.echo('Waiting for other participants...')
 
         result = self.socket.recv(self.BUFSIZE).rstrip()
-        msg = self.socket.recv(self.BUFSIZE).rstrip()
+        history = map(lambda x : list(x.split(':')[-1]), \
+                result.split(' ')[-self.participant_size:])
+        self.histories.append(history)
 
         click.echo(result)
+
+        msg = self.socket.recv(self.BUFSIZE).rstrip()
 
         if msg == 'end':
             click.echo('''
@@ -86,6 +97,20 @@ class AuctionClient(object):
 ''')
             self.end_auction()
         else:
+            price = map(lambda x : x.split(':')[-1], \
+                    msg.split(' '))
+            self.prices.append(price)
+
+            oldprice = self.prices[self.bid_round]
+
+            for i in range(self.item_size):
+                if oldprice[i] == price[i] and self.winners[i] == None:
+                    self.winners[i] = [j for h, j in\
+                            zip(history, range(len(history)))\
+                            if h[i] == '1']
+
+            self.bid_round += 1
+
             click.echo('%s\n' % msg)
             self.start_bid()
 
@@ -94,7 +119,7 @@ class AuctionClient(object):
         price = self.socket.recv(self.BUFSIZE).rstrip()
         self.socket.recv(self.BUFSIZE).rstrip()
         self.socket.recv(self.BUFSIZE).rstrip()
-        self.result = self.socket.recv(self.BUFSIZE).rstrip()
+        result = self.socket.recv(self.BUFSIZE).rstrip()
         self.socket.close()
 
         self.winner = map(lambda s : s[-1], winner.split(' ')[2:])
@@ -106,17 +131,12 @@ class AuctionClient(object):
         click.echo(winner)
         click.echo('%s\n' % price)
         click.echo('%s result %s' % (half_line, half_line))
-        click.echo(self.result)
+        click.echo(result)
         click.echo('-' * (line_length + 8))
 
-        self.format_result()
+        self.format_result(result)
 
-    def format_result(self, max_level=3):
-        histories = map(lambda line : line.split(' '), \
-                self.result.split('\n')[1:])
-        prices = map(lambda h : h[:self.item_size], histories)
-        histories = map(lambda h : map(lambda cell : list(cell),\
-                h[self.item_size:]), histories)
+    def format_result(self, result, max_level=3):
 
         if not os.path.exists(self.LOG_DIR):
             os.mkdir(self.LOG_DIR)
@@ -127,7 +147,7 @@ class AuctionClient(object):
             os.mkdir(save_dir)
 
         for winner, i in zip(self.winner, range(len(self.winner))):
-            for h in histories:
+            for h in self.histories:
                 h[int(winner)-1][i] = '1'
 
         item_range = range(self.item_size)
@@ -142,12 +162,12 @@ class AuctionClient(object):
                 if not os.path.exists(user_dir):
                     os.mkdir(user_dir)
 
-                histories_j = map(lambda h : h[j], histories)
+                histories_j = map(lambda h : h[j], self.histories)
 
                 for combi in itertools.combinations(item_range, i):
                     combi_prices = map(lambda row :\
                             [x for (x, k) in zip(row, range(len(row)))\
-                            if k in combi], prices)
+                            if k in combi], self.prices)
 
                     combi_histories = map(lambda row :\
                             [x for (x, k) in zip(row, range(len(row)))\

@@ -20,6 +20,8 @@ class AuctionClient(object):
 
         if options['eval']:
             self.load_eval_value(options['eval'])
+        else:
+            self.values = None
 
         self.bid_round = 0
         self.prices = []
@@ -36,12 +38,12 @@ class AuctionClient(object):
                 raise BaseException, '%s doesn\'t exist' % path
 
         with open(path, 'r') as eval_file:
-            self.value = {}
+            self.values = {}
             v = map(lambda x : x.split(':'), \
                     eval_file.read().split(' '))
 
             for key, val in v:
-                self.value[format_key(key)] = int(val)
+                self.values[format_key(key)] = int(val)
 
     def connect(self):
         # connect to auction server
@@ -84,19 +86,21 @@ class AuctionClient(object):
 
         self.start_bid()
 
+    def eval_value(self, item_index):
+        return self.values[str(item_index + 1)] \
+                > int(self.prices[self.bid_round][item_index])
+
     def start_bid(self):
         click.echo('bid> ', nl=False)
 
-        if self.demo > 1:
-            bid = '1' * self.item_size
-            self.demo = self.demo - 1
-            click.echo(bid)
-        elif self.demo == 1:
-            bid = '0' * self.item_size
-            self.demo = self.demo - 1
-            click.echo(bid)
+        if self.values:
+            bid = ''.join(map(lambda i : \
+                    '1' if self.eval_value(i) else '0', \
+                    range(self.item_size)))
         else:
             bid = raw_input()
+
+        click.echo(bid)
 
         self.socket.send('%s\n' % bid)
         click.echo('Waiting for other participants...')
@@ -157,9 +161,6 @@ class AuctionClient(object):
 
     def format_result(self, result, max_level=3):
 
-        click.echo(self.histories)
-        click.echo(self.prices)
-
         if not os.path.exists(self.LOG_DIR):
             os.mkdir(self.LOG_DIR)
 
@@ -191,11 +192,11 @@ class AuctionClient(object):
 
                 for combi in itertools.combinations(item_range, i):
                     combi_prices = map(lambda row :\
-                            [x for (x, k) in zip(row, range(len(row)))\
+                            [x for x, k in zip(row, range(len(row)))\
                             if k in combi], self.prices)
 
                     combi_histories = map(lambda row :\
-                            [x for (x, k) in zip(row, range(len(row)))\
+                            [x for x, k in zip(row, range(len(row)))\
                             if k in combi], histories_j)
 
                     combi_class = map(lambda row :\
@@ -225,7 +226,7 @@ CONTEXT_SETTINGS = { 'help_option_names': ['-h', '--help'] }
         help='bid automatically for n times.')
 @click.option('-e', '--evaluation', default=None, \
         help='load evaluation values.')
-def cli(host, port, demo):
+def cli(host, port, demo, evaluation):
     
     options = {
             'host': host,

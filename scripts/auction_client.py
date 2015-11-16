@@ -86,9 +86,59 @@ class AuctionClient(object):
 
         self.start_bid()
 
+    def eval_price(self, item_index):
+
+        user_index = int(self.userid) - 1
+        
+        if isinstance(self.winners[item_index], list):
+            if user_index in self.winners[item_index]:
+                return True
+            else:
+                return False
+
+        sold_out_indexes = \
+            [i for w, i in zip(self.winners, range(self.item_size)) \
+            if isinstance(w, list) and not user_index in w]
+
+        bought_indexes = \
+            [i for w, i in zip(self.winners, range(self.item_size)) \
+            if isinstance(w, list) and user_index in w]
+
+
+        def is_valid_key(key):
+            indexes = map(lambda x : int (x) - 1, key.split('-'))
+            bought_count = 0
+
+            for i in indexes:
+                if i in sold_out_indexes:
+                    return False
+                if i in bought_indexes:
+                    bought_count += 1
+
+            if bought_count == len(bought_indexes):
+                return True
+            else:
+                return False
+
+        def eval_price_by_key(key):
+            click.echo([key, self.values[key]])
+            v = float(self.values[key])
+            n = len(key.split('-')) - len(bought_indexes)
+            m = 1 - (n-1) * 0.1
+            return v / n * m
+
+        item_id = str(item_index + 1)
+        keys = [k for k in self.values.keys() \
+                if item_id in k.split('-') and is_valid_key(k)]
+
+        return sum(map(lambda k : eval_price_by_key(k), keys)) \
+                / len(keys)
+
     def eval_value(self, item_index):
-        return self.values[str(item_index + 1)] \
+        return self.eval_price(item_index) \
                 > int(self.prices[self.bid_round][item_index])
+#        return self.values[str(item_index + 1)] \
+#                > int(self.prices[self.bid_round][item_index])
 
     def start_bid(self):
         click.echo('bid> ', nl=False)

@@ -27,6 +27,7 @@ class SVM(object):
         self.do_plot = options['plot']
         self.debug = options['debug']
         self.fold = options['fold']
+        self.show_result = __name__ == '__main__'
 
         cvxopt.solvers.options['show_progress'] = self.debug
 
@@ -42,14 +43,14 @@ class SVM(object):
 
     def run(self):
         if self.kernel_mode == 'linear' or len(self.data) < 10:
-            self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot, show_result=True)
+            return self.calc_classifier(self.kernel_mode, self.data, self.clas, self.kernel, self.debug, self.do_plot, show_result=self.show_result)
         else:
             self.decide_kernel_parameter(
                     self.MIN_PARAM[self.kernel_mode],
                     self.MAX_PARAM[self.kernel_mode]
                     )
             optimal_kernel = lambda x, y : self.kernel(x, y, self.parameter)
-            self.calc_classifier(self.kernel_mode, self.data, self.clas, optimal_kernel, self.debug, self.do_plot, show_result=True)
+            return self.calc_classifier(self.kernel_mode, self.data, self.clas, optimal_kernel, self.debug, self.do_plot, show_result=self.show_result)
 
     def decide_kernel_parameter(self, min_param, max_param):
         if self.kernel_mode == 'poly':

@@ -3,6 +3,7 @@ import socket
 import click
 import itertools
 import os
+import numpy
 from datetime import date
 
 import svm
@@ -90,12 +91,6 @@ class AuctionClient(object):
 
         user_index = int(self.userid) - 1
         
-        if isinstance(self.winners[item_index], list):
-            if user_index in self.winners[item_index]:
-                return True
-            else:
-                return False
-
         sold_out_indexes = \
             [i for w, i in zip(self.winners, range(self.item_size)) \
             if isinstance(w, list) and not user_index in w]
@@ -120,11 +115,47 @@ class AuctionClient(object):
             else:
                 return False
 
+        def get_classifier_functions(key):
+
+            DATADIR_TPL = self.LOG_DIR + '/participant_%d'
+            DATAFILE_TPL = DATADIR_TPL + '/item-%s.dat'
+
+            def get_option(i):
+                return {
+                        'datafile': DATAFILE_TPL % (i, key),
+                        'debug': False,
+                        'fold': 10,
+                        'kernel': 'gauss',
+                        'plot': False
+                        }
+
+            return [svm.SVM(get_option(i+1)).run() for i \
+                    in range(self.participant_size) \
+                    if str(i+1) != self.userid and \
+                    os.path.exists(DATADIR_TPL % (i+1))]
+
+        def select_prices_by_key(key):
+            prices = self.prices[self.bid_round]
+            indexes = map(lambda k : int(k) - 1, key.split('-'))
+            return [int(p) for p, i in zip(prices, range(len(prices)))\
+                    if i in indexes]
+
         def eval_price_by_key(key):
             click.echo([key, self.values[key]])
             v = float(self.values[key])
             n = len(key.split('-')) - len(bought_indexes)
             m = 1 - (n-1) * 0.1
+
+            prices = select_prices_by_key(key)
+            classifier_funs = get_classifier_functions(key)
+            classes = map(lambda f : f(prices), classifier_funs)
+
+            for i in classes:
+                if 0.1 < i < 0.9:
+                    m = m - 0.1
+                elif 0.9 < i:
+                    m = m - 0.2
+
             return v / n * m
 
         item_id = str(item_index + 1)
@@ -135,10 +166,33 @@ class AuctionClient(object):
                 / len(keys)
 
     def eval_value(self, item_index):
-        return self.eval_price(item_index) \
-                > int(self.prices[self.bid_round][item_index])
-#        return self.values[str(item_index + 1)] \
-#                > int(self.prices[self.bid_round][item_index])
+
+        if isinstance(self.winners[item_index], list):
+            if int(self.userid) - 1 in self.winners[item_index]:
+                return True
+            else:
+                return False
+
+        prices = self.prices[self.bid_round]
+
+        def current_profit(item_index):
+
+            bought_indexes = \
+                [i for x, i \
+                in zip(self.winners, range(self.item_size)) \
+                if isinstance(x, list) and int(self.userid) - 1 in x]
+
+            if len(bought_indexes) == 0:
+                return 0
+
+            cost = sum(map(lambda i : int(prices[i]), bought_indexes))
+            key = '-'.join(map(lambda x : str(x+1), bought_indexes))
+            value = float(self.values[key])
+
+            return value - cost
+
+        return self.eval_price(item_index) > int(prices[item_index]) \
+                #> current_profit(item_index)
 
     def start_bid(self):
         click.echo('bid> ', nl=False)
@@ -214,11 +268,6 @@ class AuctionClient(object):
         if not os.path.exists(self.LOG_DIR):
             os.mkdir(self.LOG_DIR)
 
-        save_dir = '%s/%s' % (self.LOG_DIR, date.today())
-
-        if not os.path.exists(save_dir):
-            os.mkdir(save_dir)
-
         item_range = range(self.item_size)
 
         for winner, item_index in zip(self.winners, item_range):
@@ -233,7 +282,7 @@ class AuctionClient(object):
                 if j+1 == self.userid:
                     continue
 
-                user_dir = '%s/participant_%d' % (save_dir, j+1)
+                user_dir = '%s/participant_%d' % (self.LOG_DIR, j+1)
 
                 if not os.path.exists(user_dir):
                     os.mkdir(user_dir)
@@ -261,6 +310,16 @@ class AuctionClient(object):
                     save_path = '%s/item-%s.dat' %\
                             (user_dir, '-'.join(map(\
                             lambda i : str(i+1), combi)))
+
+                    if os.path.exists(save_path):
+                        data_prices = map(lambda row: \
+                                map(lambda cell: str(int(cell)), row[:-1]),\
+                                numpy.loadtxt(save_path))
+
+                        save_data = '\n'.join( \
+                                [' '.join(p + c) for p, c \
+                                in zip(combi_prices, combi_class) \
+                                if not p in data_prices])
 
                     with open(save_path, 'a+') as save_file:
                         save_file.write('%s\n' % save_data)
